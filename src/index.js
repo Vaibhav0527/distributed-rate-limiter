@@ -1,7 +1,7 @@
 import express from "express";
 import { createClient } from "redis";
 import fs from "fs";
-import { loadConfig, getConfig } from "./config/configService.js";
+import { loadConfig, getConfig, updateConfig } from "./config/configService.js";
 
 const app = express();
 const PORT = 3000;
@@ -98,6 +98,30 @@ app.get("/api/request", async (req, res) => {
     console.error("Request error:", err);
     res.status(500).json({ error: "Internal server error" });
   }
+});
+
+// -------------------- Admin APIs --------------------
+app.get("/admin/config", (req, res) => {
+  res.json(getConfig());
+});
+
+app.post("/admin/config", async (req, res) => {
+  const { rateLimit, windowSeconds, algorithm } = req.body;
+
+  if (
+    typeof rateLimit !== "number" ||
+    typeof windowSeconds !== "number"
+  ) {
+    return res.status(400).json({ error: "Invalid config payload" });
+  }
+
+  const newConfig = { rateLimit, windowSeconds, algorithm: "sliding" };
+  await updateConfig(redisClient, newConfig);
+
+  res.json({
+    success: true,
+    config: newConfig
+  });
 });
 
 // -------------------- Server Startup --------------------
