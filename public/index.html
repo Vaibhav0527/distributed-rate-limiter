@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Distributed Rate Limiter Dashboard</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div class="container">
+    <header>
+      <h1>Distributed Rate Limiter</h1>
+      <p class="subtitle">Live Monitoring & Configuration</p>
+    </header>
+
+    <!-- Metrics -->
+    <section class="card">
+      <h2>Live Metrics</h2>
+      <div class="metrics-grid">
+        <div class="metric">
+          <span class="label">Total Requests</span>
+          <span id="totalRequests" class="value">–</span>
+        </div>
+        <div class="metric">
+          <span class="label">Blocked Requests</span>
+          <span id="blockedRequests" class="value">–</span>
+        </div>
+        <div class="metric">
+          <span class="label">Avg Latency (ms)</span>
+          <span id="avgLatency" class="value">–</span>
+        </div>
+      </div>
+    </section>
+
+    <!-- Config -->
+    <section class="card">
+      <h2>Rate Limit Configuration</h2>
+      <div class="form-grid">
+        <div>
+          <label>Requests Limit</label>
+          <input id="rateLimit" type="number" />
+        </div>
+        <div>
+          <label>Window (seconds)</label>
+          <input id="windowSeconds" type="number" />
+        </div>
+      </div>
+      <button id="saveConfig">Save Configuration</button>
+      <p id="configStatus" class="status"></p>
+    </section>
+
+    <!-- Traffic Generator -->
+    <section class="card">
+      <h2>Traffic Generator</h2>
+      <div class="form-grid">
+        <div>
+          <label>User ID</label>
+          <input id="userId" value="demo-user" />
+        </div>
+        <div>
+          <label>Requests Count</label>
+          <input id="requestCount" type="number" value="10" />
+        </div>
+      </div>
+      <button id="sendTraffic">Send Requests</button>
+      <pre id="trafficOutput"></pre>
+    </section>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>
