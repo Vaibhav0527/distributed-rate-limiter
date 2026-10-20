@@ -1,5 +1,7 @@
 import express from "express";
 import { createClient } from "redis";
+import fs from "fs";
+import { loadConfig, getConfig } from "./config/configService.js";
 
 const app = express();
 const PORT = 3000;
@@ -34,6 +36,69 @@ async function connectRedisWithRetry(retries = 10, delayMs = 1000) {
 }
 
 await connectRedisWithRetry();
+
+// -------------------- Load Lua Script --------------------
+const slidingLua = fs.readFileSync("./scripts/sliding_window.lua", "utf8");
+const slidingScriptSHA = await redisClient.scriptLoad(slidingLua);
+console.log("Loaded Sliding Lua SHA:", slidingScriptSHA);
+
+// -------------------- Load Initial Config --------------------
+await loadConfig(redisClient);
+console.log("Initial config loaded:", getConfig());
+
+// -------------------- Sliding Window (Lua) --------------------
+async function slidingWindowLimiterLua({ key, limit, windowMs }) {
+  const now = Date.now();
+
+  const result = await redisClient.evalSha(
+    slidingScriptSHA,
+    {
+      keys: [key],
+      arguments: [now.toString(), windowMs.toString(), limit.toString()]
+    }
+  );
+
+  return {
+    allowed: result[0] === 1,
+    remaining: Math.max(0, Number(result[1]))
+  };
+}
+
+// -------------------- API Endpoint --------------------
+app.get("/api/request", async (req, res) => {
+  try {
+    const userId = req.query.userId || "anonymous";
+    const key = `rate:${userId}`;
+    const config = getConfig();
+
+    const result = await slidingWindowLimiterLua({
+      key,
+      limit: config.rateLimit,
+      windowMs: config.windowSeconds * 1000
+    });
+
+    res.set({
+      "X-RateLimit-Limit": config.rateLimit,
+      "X-RateLimit-Remaining": result.remaining
+    });
+
+    if (!result.allowed) {
+      return res.status(429).json({
+        error: "Too many requests",
+        remaining: result.remaining
+      });
+    }
+
+    res.json({
+      success: true,
+      algorithm: "sliding-lua",
+      remaining: result.remaining
+    });
+  } catch (err) {
+    console.error("Request error:", err);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
 
 // -------------------- Server Startup --------------------
 app.listen(PORT, () => {
