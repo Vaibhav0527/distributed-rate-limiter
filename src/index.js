@@ -1,5 +1,8 @@
 import express from "express";
+import path from "path";
+import { fileURLToPath } from "url";
 import { createClient } from "redis";
+import client from "prom-client";
 import fs from "fs";
 import { loadConfig, getConfig, updateConfig } from "./config/configService.js";
 
@@ -7,6 +10,13 @@ const app = express();
 const PORT = 3000;
 
 app.use(express.json());
+
+// Needed for __dirname in ES modules
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+// -------------------- Serve Dashboard --------------------
+app.use(express.static(path.join(__dirname, "../public")));
 
 // -------------------- Redis Setup --------------------
 const redisUrl = process.env.REDIS_URL || "redis://localhost:6379";
@@ -46,6 +56,29 @@ console.log("Loaded Sliding Lua SHA:", slidingScriptSHA);
 await loadConfig(redisClient);
 console.log("Initial config loaded:", getConfig());
 
+// -------------------- Metrics Setup --------------------
+const register = new client.Registry();
+client.collectDefaultMetrics({ register });
+
+const requestCounter = new client.Counter({
+  name: "api_requests_total",
+  help: "Total number of API requests",
+  registers: [register]
+});
+
+const blockedCounter = new client.Counter({
+  name: "api_requests_blocked_total",
+  help: "Total number of blocked requests",
+  registers: [register]
+});
+
+const latencyHistogram = new client.Histogram({
+  name: "api_request_latency_ms",
+  help: "API request latency in milliseconds",
+  buckets: [50, 100, 200, 300, 500, 1000],
+  registers: [register]
+});
+
 // -------------------- Sliding Window (Lua) --------------------
 async function slidingWindowLimiterLua({ key, limit, windowMs }) {
   const now = Date.now();
@@ -66,6 +99,9 @@ async function slidingWindowLimiterLua({ key, limit, windowMs }) {
 
 // -------------------- API Endpoint --------------------
 app.get("/api/request", async (req, res) => {
+  const startTime = Date.now();
+  requestCounter.inc();
+
   try {
     const userId = req.query.userId || "anonymous";
     const key = `rate:${userId}`;
@@ -83,12 +119,15 @@ app.get("/api/request", async (req, res) => {
     });
 
     if (!result.allowed) {
+      blockedCounter.inc();
+      latencyHistogram.observe(Date.now() - startTime);
       return res.status(429).json({
         error: "Too many requests",
         remaining: result.remaining
       });
     }
 
+    latencyHistogram.observe(Date.now() - startTime);
     res.json({
       success: true,
       algorithm: "sliding-lua",
@@ -96,6 +135,7 @@ app.get("/api/request", async (req, res) => {
     });
   } catch (err) {
     console.error("Request error:", err);
+    latencyHistogram.observe(Date.now() - startTime);
     res.status(500).json({ error: "Internal server error" });
   }
 });
@@ -124,7 +164,13 @@ app.post("/admin/config", async (req, res) => {
   });
 });
 
+// -------------------- Metrics Endpoint --------------------
+app.get("/metrics", async (req, res) => {
+  res.set("Content-Type", register.contentType);
+  res.end(await register.metrics());
+});
+
 // -------------------- Server Startup --------------------
 app.listen(PORT, () => {
-  console.log(`Server running on http://localhost:${PORT}`);
+  console.log(`Dashboard running on http://localhost:${PORT}`);
 });
